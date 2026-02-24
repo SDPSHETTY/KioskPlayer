@@ -13,17 +13,6 @@ Android kiosk video player app controlled by Managed Config (App Restrictions). 
 - Autostart on boot
 - Runtime config refresh (policy updates apply without reinstall)
 
-## Build Outputs
-
-```bash
-cd /Users/sudeepshetty/Documents/KioskPlayer
-./gradlew assembleDebug
-./gradlew assembleRelease
-```
-
-- Debug APK: `app/build/outputs/apk/debug/app-debug.apk`
-- Release unsigned APK: `app/build/outputs/apk/release/app-release-unsigned.apk`
-
 ## Generic MDM Workflow
 
 ### 1) Upload and install APK

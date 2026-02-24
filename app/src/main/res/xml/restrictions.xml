@@ -2,38 +2,32 @@
 <restrictions xmlns:android="http://schemas.android.com/apk/res/android">
 
     <restriction
-        android:key="video_dir"
-        android:title="Video Directory"
+        android:key="path"
+        android:title="Path"
         android:restrictionType="string"
         android:defaultValue="Movies" />
 
     <restriction
-        android:key="play_mode"
-        android:title="Play Mode"
+        android:key="mode"
+        android:title="Mode"
         android:restrictionType="choice"
         android:entries="@array/play_mode_entries"
         android:entryValues="@array/play_mode_values"
         android:defaultValue="playlist" />
 
     <restriction
-        android:key="single_file"
-        android:title="Single File"
+        android:key="files"
+        android:title="Files"
         android:restrictionType="string"
         android:defaultValue="" />
 
     <restriction
-        android:key="playlist_files"
-        android:title="Playlist Files"
-        android:restrictionType="string"
-        android:defaultValue="" />
-
-    <restriction
-        android:key="loop_mode"
-        android:title="Loop Mode"
+        android:key="loop"
+        android:title="Loop"
         android:restrictionType="choice"
         android:entries="@array/loop_mode_entries"
         android:entryValues="@array/loop_mode_values"
-        android:defaultValue="loop_all" />
+        android:defaultValue="all" />
 
     <restriction
         android:key="fullscreen"
@@ -42,10 +36,12 @@
         android:defaultValue="true" />
 
     <restriction
-        android:key="hide_controls"
-        android:title="Hide Controls"
-        android:restrictionType="bool"
-        android:defaultValue="true" />
+        android:key="controls"
+        android:title="Controls"
+        android:restrictionType="choice"
+        android:entries="@array/controls_entries"
+        android:entryValues="@array/controls_values"
+        android:defaultValue="hide" />
 
     <restriction
         android:key="orientation"
@@ -62,14 +58,14 @@
         android:defaultValue="false" />
 
     <restriction
-        android:key="volume_percent"
-        android:title="Volume Percent"
+        android:key="volume"
+        android:title="Volume"
         android:restrictionType="integer"
         android:defaultValue="100" />
 
     <restriction
-        android:key="autostart_on_boot"
-        android:title="Autostart on Boot"
+        android:key="autostart"
+        android:title="Autostart"
         android:restrictionType="bool"
         android:defaultValue="true" />
 

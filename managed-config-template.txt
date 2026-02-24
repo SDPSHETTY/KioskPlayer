@@ -1,48 +1,44 @@
 KioskPlayer Managed Config Template
 
-Use this as a generic reference for Esper/MDM managed config.
+Use this with any MDM that supports Android Managed Config / App Restrictions.
 
-Key: video_dir
+Key: path
 Type: string
-Allowed: Any valid directory path
+Allowed: valid directory path
 Examples:
-- /sdcard/Download/kiosk
+- /storage/emulated/0/Download/kiosk
 - Movies
 
-Key: play_mode
+Key: mode
 Type: string (choice)
 Allowed values:
 - single
 - playlist
 
-Key: single_file
+Key: files
 Type: string
-Used when play_mode=single
-Example:
+Format: comma-separated file names or absolute file paths
+Examples:
 - intro.mp4
-- /sdcard/Download/kiosk/intro.mp4
+- intro.mp4,promo.mov
+- /storage/emulated/0/Download/kiosk/intro.mp4,/storage/emulated/0/Download/kiosk/promo.mov
 
-Key: playlist_files
-Type: string
-Used when play_mode=playlist
-Format: comma-separated file names/paths
-Example:
-- intro.mp4,promo.mov,loop1.mp4
-
-Key: loop_mode
+Key: loop
 Type: string (choice)
 Allowed values:
-- loop_one
-- loop_all
-- once
+- one
+- all
+- off
 
 Key: fullscreen
 Type: boolean
 Allowed values: true, false
 
-Key: hide_controls
-Type: boolean
-Allowed values: true, false
+Key: controls
+Type: string (choice)
+Allowed values:
+- show
+- hide
 
 Key: orientation
 Type: string (choice)
@@ -55,11 +51,11 @@ Key: mute
 Type: boolean
 Allowed values: true, false
 
-Key: volume_percent
+Key: volume
 Type: integer
 Allowed range: 0 to 100
 
-Key: autostart_on_boot
+Key: autostart
 Type: boolean
 Allowed values: true, false
 
@@ -72,20 +68,19 @@ Type: boolean
 Allowed values: true, false
 
 ------------------------------------------------------------
-Generic JSON payload (edit values as needed)
+Generic JSON payload (valid JSON)
 ------------------------------------------------------------
 {
-  "mute": false,
-  "loop_mode": "loop_all",
-  "play_mode": "playlist",
-  "video_dir": "/storage/emulated/0/Download",
+  "path": "/storage/emulated/0/Download/kiosk",
+  "mode": "playlist",
+  "files": "intro.mp4,promo.mov",
+  "loop": "all",
   "fullscreen": true,
+  "controls": "hide",
   "orientation": "landscape",
-  "single_file": "",
-  "hide_controls": true,
-  "volume_percent": 80,
-  "playlist_files: 14406.mp4,20231016_122837.mp4,
-  "autostart_on_boot": true,
+  "mute": false,
+  "volume": 80,
+  "autostart": true,
   "show_debug_overlay": false,
   "skip_missing_files": true
 }

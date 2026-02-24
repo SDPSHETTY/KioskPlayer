@@ -15,9 +15,17 @@
         <item>Play Once</item>
     </string-array>
     <string-array name="loop_mode_values">
-        <item>loop_one</item>
-        <item>loop_all</item>
-        <item>once</item>
+        <item>one</item>
+        <item>all</item>
+        <item>off</item>
+    </string-array>
+    <string-array name="controls_entries">
+        <item>Show</item>
+        <item>Hide</item>
+    </string-array>
+    <string-array name="controls_values">
+        <item>show</item>
+        <item>hide</item>
     </string-array>
     <string-array name="orientation_entries">
         <item>Landscape</item>

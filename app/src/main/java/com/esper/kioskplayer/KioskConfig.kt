@@ -31,44 +31,94 @@ data class KioskConfig(
             val isDebuggable = (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
             val useDebugOverrides = isDebuggable && prefs.getBoolean(KEY_DEBUG_OVERRIDE_ENABLED, false)
 
-            fun str(key: String, default: String): String {
+            fun strAny(default: String, vararg keys: String): String {
                 if (useDebugOverrides) {
-                    val fromPrefs = prefs.getString(key, null)
-                    if (fromPrefs != null) return fromPrefs.trim()
+                    for (key in keys) {
+                        val fromPrefs = prefs.getString(key, null)
+                        if (fromPrefs != null) return fromPrefs.trim()
+                    }
                 }
-                return (b.getString(key) ?: default).trim()
+                for (key in keys) {
+                    if (b.containsKey(key)) {
+                        return (b.getString(key) ?: default).trim()
+                    }
+                }
+                return default.trim()
             }
 
-            fun bool(key: String, default: Boolean): Boolean {
-                if (useDebugOverrides && prefs.contains(key)) return prefs.getBoolean(key, default)
-                return if (b.containsKey(key)) b.getBoolean(key, default) else default
+            fun boolAny(default: Boolean, vararg keys: String): Boolean {
+                if (useDebugOverrides) {
+                    for (key in keys) {
+                        if (prefs.contains(key)) return prefs.getBoolean(key, default)
+                    }
+                }
+                for (key in keys) {
+                    if (b.containsKey(key)) return b.getBoolean(key, default)
+                }
+                return default
             }
 
-            fun int(key: String, default: Int): Int {
-                if (useDebugOverrides && prefs.contains(key)) return prefs.getInt(key, default)
-                return if (b.containsKey(key)) b.getInt(key, default) else default
+            fun intAny(default: Int, vararg keys: String): Int {
+                if (useDebugOverrides) {
+                    for (key in keys) {
+                        if (prefs.contains(key)) return prefs.getInt(key, default)
+                    }
+                }
+                for (key in keys) {
+                    if (b.containsKey(key)) return b.getInt(key, default)
+                }
+                return default
             }
 
-            val playlistRaw = str("playlist_files", "")
-            val playlist = playlistRaw
+            val modeRaw = strAny("playlist", "mode", "play_mode").lowercase()
+            val loopRaw = strAny("all", "loop", "loop_mode").lowercase()
+            val controlsRaw = strAny("", "controls").lowercase()
+            val filesRaw = strAny("", "files", "playlist_files")
+            val singleFileLegacy = strAny("", "single_file")
+
+            val normalizedLoop = when (loopRaw) {
+                "one", "loop_one" -> "loop_one"
+                "all", "loop_all" -> "loop_all"
+                "off", "once" -> "once"
+                else -> "loop_all"
+            }
+
+            val normalizedMode = when (modeRaw) {
+                "single" -> "single"
+                else -> "playlist"
+            }
+
+            val playlist = filesRaw
                 .split(',', '\n', ';')
                 .map { it.trim() }
                 .filter { it.isNotEmpty() }
 
+            val singleFile = when {
+                normalizedMode == "single" && playlist.isNotEmpty() -> playlist.first()
+                normalizedMode == "single" && singleFileLegacy.isNotEmpty() -> singleFileLegacy
+                else -> ""
+            }
+
+            val hideControls = when (controlsRaw) {
+                "show" -> false
+                "hide" -> true
+                else -> boolAny(true, "hide_controls")
+            }
+
             return KioskConfig(
-                videoDir = str("video_dir", "Movies"),
-                playMode = str("play_mode", "playlist").lowercase(),
-                singleFile = str("single_file", ""),
+                videoDir = strAny("Movies", "path", "video_dir"),
+                playMode = normalizedMode,
+                singleFile = singleFile,
                 playlistFiles = playlist,
-                loopMode = str("loop_mode", "loop_all").lowercase(),
-                fullscreen = bool("fullscreen", true),
-                hideControls = bool("hide_controls", true),
-                orientation = str("orientation", "landscape").lowercase(),
-                mute = bool("mute", false),
-                volumePercent = int("volume_percent", 100).coerceIn(0, 100),
-                autostartOnBoot = bool("autostart_on_boot", true),
-                skipMissingFiles = bool("skip_missing_files", true),
-                showDebugOverlay = bool("show_debug_overlay", false),
+                loopMode = normalizedLoop,
+                fullscreen = boolAny(true, "fullscreen"),
+                hideControls = hideControls,
+                orientation = strAny("landscape", "orientation").lowercase(),
+                mute = boolAny(false, "mute"),
+                volumePercent = intAny(100, "volume", "volume_percent").coerceIn(0, 100),
+                autostartOnBoot = boolAny(true, "autostart", "autostart_on_boot"),
+                skipMissingFiles = boolAny(true, "skip_missing_files"),
+                showDebugOverlay = boolAny(false, "show_debug_overlay"),
             )
         }
 

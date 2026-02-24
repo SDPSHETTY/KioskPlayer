@@ -16,20 +16,27 @@ class DebugConfigReceiver : BroadcastReceiver() {
         }
 
         val values = mutableMapOf<String, Any?>()
+        values["path"] = intent.getStringExtra("path")
         values["video_dir"] = intent.getStringExtra("video_dir")
+        values["mode"] = intent.getStringExtra("mode")
         values["play_mode"] = intent.getStringExtra("play_mode")
+        values["files"] = intent.getStringExtra("files")
         values["single_file"] = intent.getStringExtra("single_file")
         values["playlist_files"] = intent.getStringExtra("playlist_files")
+        values["loop"] = intent.getStringExtra("loop")
         values["loop_mode"] = intent.getStringExtra("loop_mode")
+        values["controls"] = intent.getStringExtra("controls")
         values["orientation"] = intent.getStringExtra("orientation")
 
         if (intent.hasExtra("fullscreen")) values["fullscreen"] = intent.getBooleanExtra("fullscreen", true)
         if (intent.hasExtra("hide_controls")) values["hide_controls"] = intent.getBooleanExtra("hide_controls", true)
         if (intent.hasExtra("mute")) values["mute"] = intent.getBooleanExtra("mute", false)
         if (intent.hasExtra("autostart_on_boot")) values["autostart_on_boot"] = intent.getBooleanExtra("autostart_on_boot", true)
+        if (intent.hasExtra("autostart")) values["autostart"] = intent.getBooleanExtra("autostart", true)
         if (intent.hasExtra("skip_missing_files")) values["skip_missing_files"] = intent.getBooleanExtra("skip_missing_files", true)
         if (intent.hasExtra("show_debug_overlay")) values["show_debug_overlay"] = intent.getBooleanExtra("show_debug_overlay", false)
         if (intent.hasExtra("volume_percent")) values["volume_percent"] = intent.getIntExtra("volume_percent", 100)
+        if (intent.hasExtra("volume")) values["volume"] = intent.getIntExtra("volume", 100)
 
         KioskConfig.updateDebugOverrides(context, values)
         context.sendBroadcast(Intent(ManagedConfigReceiver.ACTION_CONFIG_CHANGED).setPackage(context.packageName))

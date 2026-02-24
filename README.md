@@ -140,10 +140,6 @@ Android kiosk video player controlled by Managed Config (App Restrictions).
 - `files` accepts relative names or absolute file paths.
 - Relative file names are resolved under `path`.
 
-## Legacy Key Support
-
-The app still accepts older keys (`video_dir`, `play_mode`, `playlist_files`, `loop_mode`, `hide_controls`, `volume_percent`, `autostart_on_boot`) for compatibility.
-
 ## Remote Control Actions
 
 - Refresh playback now:

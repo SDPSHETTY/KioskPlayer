@@ -109,11 +109,7 @@ class MainActivity : AppCompatActivity() {
             addAction(ControlReceiver.ACTION_HEALTH_DUMP)
             addAction(ControlReceiver.ACTION_HEALTH_DUMP_INTERNAL)
         }
-        if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(restrictionsChangedReceiver, filter, RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(restrictionsChangedReceiver, filter)
-        }
+        ContextCompat.registerReceiver(this, restrictionsChangedReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         mainHandler.post(configPollRunnable)
     }
 

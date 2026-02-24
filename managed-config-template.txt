@@ -1,0 +1,91 @@
+KioskPlayer Managed Config Template
+
+Use this as a generic reference for Esper/MDM managed config.
+
+Key: video_dir
+Type: string
+Allowed: Any valid directory path
+Examples:
+- /sdcard/Download/kiosk
+- Movies
+
+Key: play_mode
+Type: string (choice)
+Allowed values:
+- single
+- playlist
+
+Key: single_file
+Type: string
+Used when play_mode=single
+Example:
+- intro.mp4
+- /sdcard/Download/kiosk/intro.mp4
+
+Key: playlist_files
+Type: string
+Used when play_mode=playlist
+Format: comma-separated file names/paths
+Example:
+- intro.mp4,promo.mov,loop1.mp4
+
+Key: loop_mode
+Type: string (choice)
+Allowed values:
+- loop_one
+- loop_all
+- once
+
+Key: fullscreen
+Type: boolean
+Allowed values: true, false
+
+Key: hide_controls
+Type: boolean
+Allowed values: true, false
+
+Key: orientation
+Type: string (choice)
+Allowed values:
+- landscape
+- portrait
+- auto
+
+Key: mute
+Type: boolean
+Allowed values: true, false
+
+Key: volume_percent
+Type: integer
+Allowed range: 0 to 100
+
+Key: autostart_on_boot
+Type: boolean
+Allowed values: true, false
+
+Key: skip_missing_files
+Type: boolean
+Allowed values: true, false
+
+Key: show_debug_overlay
+Type: boolean
+Allowed values: true, false
+
+------------------------------------------------------------
+Generic JSON payload (edit values as needed)
+------------------------------------------------------------
+{
+  "mute": false,
+  "loop_mode": "loop_all",
+  "play_mode": "playlist",
+  "video_dir": "/storage/emulated/0/Download",
+  "fullscreen": true,
+  "orientation": "landscape",
+  "single_file": "",
+  "hide_controls": true,
+  "volume_percent": 80,
+  "playlist_files: 14406.mp4,20231016_122837.mp4,
+  "autostart_on_boot": true,
+  "show_debug_overlay": false,
+  "skip_missing_files": true
+}

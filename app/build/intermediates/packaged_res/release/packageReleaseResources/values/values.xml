@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="loop_mode_entries">
+        <item>Loop One</item>
+        <item>Loop All</item>
+        <item>Play Once</item>
+    </string-array>
+    <string-array name="loop_mode_values">
+        <item>loop_one</item>
+        <item>loop_all</item>
+        <item>once</item>
+    </string-array>
+    <string-array name="orientation_entries">
+        <item>Landscape</item>
+        <item>Portrait</item>
+        <item>Auto</item>
+    </string-array>
+    <string-array name="orientation_values">
+        <item>landscape</item>
+        <item>portrait</item>
+        <item>auto</item>
+    </string-array>
+    <string-array name="play_mode_entries">
+        <item>Single</item>
+        <item>Playlist</item>
+    </string-array>
+    <string-array name="play_mode_values">
+        <item>single</item>
+        <item>playlist</item>
+    </string-array>
+    <color name="black">#000000</color>
+    <color name="white">#FFFFFF</color>
+    <string name="app_name">KioskPlayer</string>
+    <string name="overlay_no_media">No playable video found for current config.</string>
+    <style name="Theme.KioskPlayer" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:statusBarColor">@android:color/black</item>
+        <item name="android:navigationBarColor">@android:color/black</item>
+    </style>
+</resources>

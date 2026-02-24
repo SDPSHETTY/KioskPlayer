@@ -158,20 +158,24 @@ class MainActivity : AppCompatActivity() {
         if (playableFiles.isEmpty()) {
             player?.stop()
             Log.w(TAG, "No playable files found for video_dir=${config.videoDir}")
-            showStatus(
-                true,
+            val message = if (config.showDebugOverlay) {
                 buildOverlay(config, "No playable files found.", files)
-            )
+            } else {
+                "No videos found. Please check the path and file names in managed config."
+            }
+            showStatus(true, message)
             return
         }
 
         if (!config.skipMissingFiles && playableFiles.size != files.size) {
             player?.stop()
             Log.w(TAG, "Missing files detected and skip_missing_files=false")
-            showStatus(
-                true,
+            val message = if (config.showDebugOverlay) {
                 buildOverlay(config, "Some configured files are missing and skip_missing_files=false.", files)
-            )
+            } else {
+                "Some videos are missing. Update managed config or upload missing files."
+            }
+            showStatus(true, message)
             return
         }
 

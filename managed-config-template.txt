@@ -30,6 +30,53 @@ Allowed values:
 - all
 - off
 
+Key: stream_url
+Type: string
+Allowed: valid stream URL (HLS/MP4)
+Example:
+- https://example.com/live.m3u8
+
+Key: source_preference
+Type: string (choice)
+Allowed values:
+- local_first
+- stream_first
+- local_only
+- stream_only
+
+Key: fallback_on_stream_error
+Type: boolean
+Allowed values: true, false
+
+Key: image_duration_sec
+Type: integer
+Allowed range: 1 to 3600
+
+Key: schedule_enabled
+Type: boolean
+Allowed values: true, false
+
+Key: schedule_start
+Type: string
+Format: HH:mm
+Example: 09:00
+
+Key: schedule_end
+Type: string
+Format: HH:mm
+Example: 18:00
+
+Key: schedule_days
+Type: string
+Format: comma-separated short day names or 1..7
+Examples:
+- mon,tue,wed,thu,fri
+- 1,2,3,4,5
+
+Key: heartbeat_sec
+Type: integer
+Allowed range: 15 to 3600
+
 Key: fullscreen
 Type: boolean
 Allowed values: true, false
@@ -75,6 +122,15 @@ Generic JSON payload (valid JSON)
   "mode": "playlist",
   "files": "intro.mp4,promo.mov",
   "loop": "all",
+  "stream_url": "",
+  "source_preference": "local_first",
+  "fallback_on_stream_error": true,
+  "image_duration_sec": 10,
+  "schedule_enabled": false,
+  "schedule_start": "00:00",
+  "schedule_end": "23:59",
+  "schedule_days": "mon,tue,wed,thu,fri,sat,sun",
+  "heartbeat_sec": 60,
   "fullscreen": true,
   "controls": "hide",
   "orientation": "landscape",

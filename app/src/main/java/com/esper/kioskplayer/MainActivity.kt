@@ -7,14 +7,16 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.os.Environment
 import android.view.View
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -24,32 +26,58 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import java.io.File
+import java.time.DayOfWeek
+import java.time.LocalTime
 
 class MainActivity : AppCompatActivity() {
 
-    private val mainHandler = Handler(Looper.getMainLooper())
-    private val configPollRunnable = object : Runnable {
-        override fun run() {
-            applyConfigAndStartPlayback(force = false)
-            mainHandler.postDelayed(this, 10000)
-        }
+    private data class PlayItem(
+        val path: String,
+        val type: ItemType,
+        val isStream: Boolean = false,
+    )
+
+    private enum class ItemType {
+        VIDEO,
+        IMAGE,
     }
 
     private lateinit var playerView: PlayerView
+    private lateinit var imageView: ImageView
     private lateinit var statusText: TextView
 
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var player: ExoPlayer? = null
     private var currentConfig: KioskConfig? = null
     private var permissionRequestInFlight = false
 
+    private var currentItems: List<PlayItem> = emptyList()
+    private var currentIndex = 0
+    private var imageAdvanceRunnable: Runnable? = null
+
+    private var lastPlayerError: String? = null
+
+    private val configPollRunnable = object : Runnable {
+        override fun run() {
+            applyConfigAndStartPlayback(force = false)
+            val next = currentConfig?.heartbeatSec ?: 60
+            mainHandler.postDelayed(this, next * 1000L)
+        }
+    }
+
     private val restrictionsChangedReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == ManagedConfigReceiver.ACTION_CONFIG_CHANGED) {
+            val action = intent?.action ?: return
+            if (action == ManagedConfigReceiver.ACTION_CONFIG_CHANGED || action == ControlReceiver.ACTION_REFRESH_NOW) {
                 applyConfigAndStartPlayback(force = true)
+            }
+            if (action == ControlReceiver.ACTION_HEALTH_DUMP_INTERNAL || action == ControlReceiver.ACTION_HEALTH_DUMP) {
+                dumpHealthToLog()
             }
         }
     }
@@ -66,6 +94,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         playerView = findViewById(R.id.playerView)
+        imageView = findViewById(R.id.imageView)
         statusText = findViewById(R.id.statusText)
 
         ensurePlayer()
@@ -74,7 +103,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        val filter = IntentFilter(ManagedConfigReceiver.ACTION_CONFIG_CHANGED)
+        val filter = IntentFilter().apply {
+            addAction(ManagedConfigReceiver.ACTION_CONFIG_CHANGED)
+            addAction(ControlReceiver.ACTION_REFRESH_NOW)
+            addAction(ControlReceiver.ACTION_HEALTH_DUMP)
+            addAction(ControlReceiver.ACTION_HEALTH_DUMP_INTERNAL)
+        }
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(restrictionsChangedReceiver, filter, RECEIVER_NOT_EXPORTED)
         } else {
@@ -85,6 +119,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         mainHandler.removeCallbacks(configPollRunnable)
+        stopImageTimer()
         try {
             unregisterReceiver(restrictionsChangedReceiver)
         } catch (_: IllegalArgumentException) {
@@ -99,12 +134,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun ensurePlayer() {
         if (player != null) return
-
         val exoPlayer = ExoPlayer.Builder(this).build().apply {
             addListener(object : Player.Listener {
-                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                    statusText.visibility = View.VISIBLE
-                    statusText.text = "Playback error: ${error.errorCodeName} ${error.message ?: ""}".trim()
+                override fun onPlayerError(error: PlaybackException) {
+                    lastPlayerError = "${error.errorCodeName} ${error.message ?: ""}".trim()
+                    Log.e(TAG, "Playback error: $lastPlayerError")
+                    val cfg = currentConfig
+                    if (cfg?.fallbackOnStreamError == true) {
+                        playNextFromSequence(allowWrap = false)
+                    }
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -116,6 +154,9 @@ class MainActivity : AppCompatActivity() {
                         else -> playbackState.toString()
                     }
                     Log.i(TAG, "Playback state=$stateLabel repeatMode=${player?.repeatMode} playWhenReady=${player?.playWhenReady}")
+                    if (playbackState == Player.STATE_ENDED) {
+                        playNextFromSequence(allowWrap = true)
+                    }
                 }
             })
         }
@@ -132,7 +173,7 @@ class MainActivity : AppCompatActivity() {
     private fun applyConfigAndStartPlayback(force: Boolean) {
         ensurePlayer()
         if (!requestMediaReadPermissionIfNeeded()) {
-            showStatus(true, "Storage permission required to read videos")
+            showStatus(true, "Storage permission required to read media files.")
             return
         }
 
@@ -142,66 +183,205 @@ class MainActivity : AppCompatActivity() {
 
         Log.i(
             TAG,
-            "Applying config play_mode=${config.playMode} loop_mode=${config.loopMode} fullscreen=${config.fullscreen} " +
-                "hide_controls=${config.hideControls} orientation=${config.orientation} mute=${config.mute} " +
-                "volume_percent=${config.volumePercent} autostart_on_boot=${config.autostartOnBoot} " +
-                "skip_missing_files=${config.skipMissingFiles}"
+            "Applying config mode=${config.playMode} loop=${config.loopMode} path=${config.videoDir} source_pref=${config.sourcePreference}"
         )
 
         applyWindowMode(config)
         applyOrientation(config)
         playerView.useController = !config.hideControls
 
-        val files = buildTargetFileList(config)
-        val playableFiles = files.filter { it.exists() && it.isFile && isVideoFile(it) }
-
-        if (playableFiles.isEmpty()) {
-            player?.stop()
-            Log.w(TAG, "No playable files found for video_dir=${config.videoDir}")
-            val message = if (config.showDebugOverlay) {
-                buildOverlay(config, "No playable files found.", files)
-            } else {
-                "No videos found. Please check the path and file names in managed config."
-            }
-            showStatus(true, message)
+        if (!isWithinSchedule(config)) {
+            stopPlayback()
+            showStatus(true, "Playback is outside scheduled hours.")
+            recordHealth(config, "SCHEDULED_OFF", "outside_schedule", 0)
             return
         }
 
-        if (!config.skipMissingFiles && playableFiles.size != files.size) {
-            player?.stop()
-            Log.w(TAG, "Missing files detected and skip_missing_files=false")
+        val items = buildPlayItems(config)
+        if (items.isEmpty()) {
+            stopPlayback()
             val message = if (config.showDebugOverlay) {
-                buildOverlay(config, "Some configured files are missing and skip_missing_files=false.", files)
+                buildOverlay(config, "No playable files found.", emptyList())
             } else {
-                "Some videos are missing. Update managed config or upload missing files."
+                "No media found. Check path, stream URL, and file names in managed config."
             }
             showStatus(true, message)
+            recordHealth(config, "NO_MEDIA", "no_media", 0)
             return
         }
 
-        val mediaItems = playableFiles.map { MediaItem.fromUri(Uri.fromFile(it)) }
-        val shouldReloadMedia = force || previous != config
+        if (!config.skipMissingFiles && hasMissingFiles(config)) {
+            stopPlayback()
+            showStatus(true, "Some media files are missing. Upload files or update config.")
+            recordHealth(config, "MISSING_MEDIA", "missing_files", 0)
+            return
+        }
+
+        val shouldReload = force || previous != config || currentItems.isEmpty()
+        if (shouldReload) {
+            currentItems = items
+            currentIndex = 0
+            playCurrentItem(config)
+        }
+
+        val overlay = buildOverlay(config, "Playing ${currentItems.size} item(s)", currentItems.map { File(it.path) })
+        showStatus(config.showDebugOverlay, overlay)
+        recordHealth(config, "PLAYING", null, currentItems.size)
+    }
+
+    private fun buildPlayItems(config: KioskConfig): List<PlayItem> {
+        val localItems = buildLocalItems(config)
+        val streamItem = config.streamUrl.takeIf { it.isNotBlank() }?.let { PlayItem(it, ItemType.VIDEO, isStream = true) }
+
+        return when (config.sourcePreference) {
+            "stream_only" -> listOfNotNull(streamItem)
+            "stream_first" -> listOfNotNull(streamItem) + localItems
+            "local_only" -> localItems
+            else -> localItems + listOfNotNull(streamItem)
+        }
+    }
+
+    private fun buildLocalItems(config: KioskConfig): List<PlayItem> {
+        val baseDir = resolveBaseDirectory(config.videoDir)
+        val requested = when {
+            config.playMode == "single" && config.singleFile.isNotBlank() -> listOf(config.singleFile)
+            config.playlistFiles.isNotEmpty() -> config.playlistFiles
+            else -> listFilesFromDirectory(baseDir).map { it.absolutePath }
+        }
+
+        return requested.map { resolveFile(baseDir, it) }
+            .filter { it.exists() && it.isFile && isSupportedMediaFile(it) }
+            .map { file ->
+                val type = if (isImageFile(file)) ItemType.IMAGE else ItemType.VIDEO
+                PlayItem(file.absolutePath, type)
+            }
+    }
+
+    private fun hasMissingFiles(config: KioskConfig): Boolean {
+        val baseDir = resolveBaseDirectory(config.videoDir)
+        val requested = when {
+            config.playMode == "single" && config.singleFile.isNotBlank() -> listOf(config.singleFile)
+            config.playlistFiles.isNotEmpty() -> config.playlistFiles
+            else -> emptyList()
+        }
+        if (requested.isEmpty()) return false
+        return requested.any { entry ->
+            val f = resolveFile(baseDir, entry)
+            !f.exists() || !f.isFile || !isSupportedMediaFile(f)
+        }
+    }
+
+    private fun playCurrentItem(config: KioskConfig) {
+        if (currentItems.isEmpty()) return
+        val item = currentItems[currentIndex.coerceIn(0, currentItems.lastIndex)]
+        stopImageTimer()
+
+        if (item.type == ItemType.IMAGE) {
+            player?.stop()
+            playerView.visibility = View.GONE
+            imageView.visibility = View.VISIBLE
+
+            val bitmap = BitmapFactory.decodeFile(item.path)
+            if (bitmap == null) {
+                playNextFromSequence(allowWrap = true)
+                return
+            }
+
+            imageView.setImageBitmap(bitmap)
+            val delayMs = (config.imageDurationSec.coerceAtLeast(1) * 1000L)
+            imageAdvanceRunnable = Runnable { playNextFromSequence(allowWrap = true) }
+            mainHandler.postDelayed(imageAdvanceRunnable!!, delayMs)
+            return
+        }
+
+        imageView.visibility = View.GONE
+        playerView.visibility = View.VISIBLE
+
         val exoPlayer = player ?: return
-
-        if (shouldReloadMedia) {
-            exoPlayer.setMediaItems(mediaItems, true)
-            exoPlayer.prepare()
-        }
-
-        exoPlayer.repeatMode = when (config.loopMode) {
-            "loop_one" -> Player.REPEAT_MODE_ONE
-            "loop_all" -> Player.REPEAT_MODE_ALL
-            else -> Player.REPEAT_MODE_OFF
-        }
+        exoPlayer.setMediaItem(MediaItem.fromUri(Uri.parse(item.path)), true)
+        exoPlayer.repeatMode = Player.REPEAT_MODE_OFF
         exoPlayer.setPauseAtEndOfMediaItems(config.loopMode == "once")
         exoPlayer.volume = if (config.mute) 0f else config.volumePercent / 100f
         exoPlayer.videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
+        exoPlayer.prepare()
         exoPlayer.playWhenReady = true
+    }
 
-        showStatus(
-            config.showDebugOverlay,
-            buildOverlay(config, "Playing ${playableFiles.size} file(s)", playableFiles)
-        )
+    private fun playNextFromSequence(allowWrap: Boolean) {
+        val config = currentConfig ?: return
+        if (currentItems.isEmpty()) return
+
+        when (config.loopMode) {
+            "loop_one" -> {
+                playCurrentItem(config)
+                return
+            }
+
+            "loop_all" -> {
+                currentIndex++
+                if (currentIndex > currentItems.lastIndex) currentIndex = 0
+            }
+
+            else -> {
+                currentIndex++
+                if (currentIndex > currentItems.lastIndex) {
+                    if (allowWrap) {
+                        stopPlayback()
+                        showStatus(true, "Playlist completed.")
+                        recordHealth(config, "ENDED", null, currentItems.size)
+                    }
+                    return
+                }
+            }
+        }
+        playCurrentItem(config)
+    }
+
+    private fun stopPlayback() {
+        stopImageTimer()
+        imageView.visibility = View.GONE
+        playerView.visibility = View.VISIBLE
+        player?.stop()
+    }
+
+    private fun stopImageTimer() {
+        imageAdvanceRunnable?.let { mainHandler.removeCallbacks(it) }
+        imageAdvanceRunnable = null
+    }
+
+    private fun isWithinSchedule(config: KioskConfig): Boolean {
+        if (!config.scheduleEnabled) return true
+        val now = java.time.LocalDateTime.now()
+        val day = when (now.dayOfWeek) {
+            DayOfWeek.MONDAY -> 1
+            DayOfWeek.TUESDAY -> 2
+            DayOfWeek.WEDNESDAY -> 3
+            DayOfWeek.THURSDAY -> 4
+            DayOfWeek.FRIDAY -> 5
+            DayOfWeek.SATURDAY -> 6
+            DayOfWeek.SUNDAY -> 7
+        }
+        if (!config.scheduleDays.contains(day)) return false
+
+        val start = parseTime(config.scheduleStart) ?: return true
+        val end = parseTime(config.scheduleEnd) ?: return true
+        val current = now.toLocalTime()
+
+        return if (end.isAfter(start) || end == start) {
+            current >= start && current <= end
+        } else {
+            current >= start || current <= end
+        }
+    }
+
+    private fun parseTime(value: String): LocalTime? {
+        return try {
+            val parts = value.trim().split(':')
+            if (parts.size != 2) return null
+            LocalTime.of(parts[0].toInt(), parts[1].toInt())
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun applyWindowMode(config: KioskConfig) {
@@ -209,8 +389,7 @@ class MainActivity : AppCompatActivity() {
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         if (config.fullscreen) {
             controller.hide(WindowInsetsCompat.Type.systemBars())
-            controller.systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         } else {
             controller.show(WindowInsetsCompat.Type.systemBars())
         }
@@ -224,24 +403,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun buildTargetFileList(config: KioskConfig): List<File> {
-        val baseDir = resolveBaseDirectory(config.videoDir)
-
-        if (config.playMode == "single") {
-            if (config.singleFile.isBlank()) return emptyList()
-            return listOf(resolveFile(baseDir, config.singleFile))
-        }
-
-        if (config.playlistFiles.isNotEmpty()) {
-            return config.playlistFiles.map { resolveFile(baseDir, it) }
-        }
-
-        return listFilesFromDirectory(baseDir)
-    }
-
     private fun resolveBaseDirectory(path: String): File? {
         if (path.isBlank()) return null
-
         val direct = File(path)
         if (direct.isAbsolute) return direct
 
@@ -250,44 +413,45 @@ class MainActivity : AppCompatActivity() {
             File(filesDir, path),
             File(Environment.getExternalStorageDirectory(), path),
         )
-
         return candidates.firstOrNull { it.exists() } ?: candidates.firstOrNull()
     }
 
     private fun resolveFile(baseDir: File?, entry: String): File {
         val cleaned = entry.trim()
         if (cleaned.startsWith("/")) return File(cleaned)
-        if (baseDir != null) return File(baseDir, cleaned)
-        return File(cleaned)
+        return if (baseDir != null) File(baseDir, cleaned) else File(cleaned)
     }
 
     private fun listFilesFromDirectory(baseDir: File?): List<File> {
         if (baseDir == null || !baseDir.exists() || !baseDir.isDirectory) return emptyList()
-        return baseDir.listFiles()
-            ?.filter { it.isFile && isVideoFile(it) }
-            ?.sortedBy { it.name.lowercase() }
-            ?: emptyList()
+        return baseDir.listFiles()?.filter { it.isFile && isSupportedMediaFile(it) }?.sortedBy { it.name.lowercase() } ?: emptyList()
     }
+
+    private fun isSupportedMediaFile(file: File): Boolean = isVideoFile(file) || isImageFile(file)
 
     private fun isVideoFile(file: File): Boolean {
         val name = file.name.lowercase()
-        return name.endsWith(".mp4") ||
-            name.endsWith(".mkv") ||
-            name.endsWith(".webm") ||
-            name.endsWith(".mov") ||
-            name.endsWith(".m4v")
+        return name.endsWith(".mp4") || name.endsWith(".mkv") || name.endsWith(".webm") || name.endsWith(".mov") || name.endsWith(".m4v")
+    }
+
+    private fun isImageFile(file: File): Boolean {
+        val name = file.name.lowercase()
+        return name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".gif") || name.endsWith(".webp")
     }
 
     private fun buildOverlay(config: KioskConfig, headline: String, files: List<File>): String {
-        val filePreview = files.take(5).joinToString("\n") { "- ${it.absolutePath}" }
+        val preview = files.take(5).joinToString("\n") { "- ${it.absolutePath}" }
         return """
             $headline
-            play_mode=${config.playMode}
-            loop_mode=${config.loopMode}
-            video_dir=${config.videoDir}
+            mode=${config.playMode}
+            loop=${config.loopMode}
+            path=${config.videoDir}
+            source_preference=${config.sourcePreference}
+            stream_url=${config.streamUrl.takeIf { it.isNotBlank() } ?: "<none>"}
+            schedule_enabled=${config.scheduleEnabled}
             count=${files.size}
             files:
-            $filePreview
+            $preview
         """.trimIndent()
     }
 
@@ -298,17 +462,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun requestMediaReadPermissionIfNeeded(): Boolean {
         val permissions = mutableListOf<String>()
-
         if (Build.VERSION.SDK_INT >= 33) {
-            if (!hasPermission(Manifest.permission.READ_MEDIA_VIDEO)) {
-                permissions.add(Manifest.permission.READ_MEDIA_VIDEO)
-            }
+            if (!hasPermission(Manifest.permission.READ_MEDIA_VIDEO)) permissions.add(Manifest.permission.READ_MEDIA_VIDEO)
+            if (!hasPermission(Manifest.permission.READ_MEDIA_IMAGES)) permissions.add(Manifest.permission.READ_MEDIA_IMAGES)
         } else {
-            if (!hasPermission(Manifest.permission.READ_EXTERNAL_STORAGE)) {
-                permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
-            }
+            if (!hasPermission(Manifest.permission.READ_EXTERNAL_STORAGE)) permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
-
         if (permissions.isNotEmpty()) {
             if (!permissionRequestInFlight) {
                 permissionRequestInFlight = true
@@ -316,16 +475,36 @@ class MainActivity : AppCompatActivity() {
             }
             return false
         }
-
         return true
     }
 
-    private fun hasPermission(permission: String): Boolean {
-        return ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+    private fun hasPermission(permission: String): Boolean =
+        ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+
+    private fun recordHealth(config: KioskConfig, state: String, error: String?, mediaCount: Int) {
+        val prefs = getSharedPreferences(HEALTH_PREFS, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putLong("last_update_ms", System.currentTimeMillis())
+            .putString("state", state)
+            .putString("error", error)
+            .putInt("media_count", mediaCount)
+            .putString("path", config.videoDir)
+            .putString("mode", config.playMode)
+            .putString("loop", config.loopMode)
+            .apply()
+    }
+
+    private fun dumpHealthToLog() {
+        val prefs = getSharedPreferences(HEALTH_PREFS, Context.MODE_PRIVATE)
+        Log.i(
+            TAG,
+            "health state=${prefs.getString("state", "unknown")} error=${prefs.getString("error", null)} media_count=${prefs.getInt("media_count", 0)} updated=${prefs.getLong("last_update_ms", 0)}"
+        )
     }
 
     companion object {
         private const val TAG = "KioskPlayer"
+        private const val HEALTH_PREFS = "kioskplayer_health"
 
         fun start(context: Context) {
             val intent = Intent(context, MainActivity::class.java).apply {

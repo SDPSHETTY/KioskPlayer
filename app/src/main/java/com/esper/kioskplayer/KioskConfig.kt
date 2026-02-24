@@ -11,6 +11,15 @@ data class KioskConfig(
     val singleFile: String,
     val playlistFiles: List<String>,
     val loopMode: String,
+    val imageDurationSec: Int,
+    val streamUrl: String,
+    val sourcePreference: String,
+    val fallbackOnStreamError: Boolean,
+    val scheduleEnabled: Boolean,
+    val scheduleStart: String,
+    val scheduleEnd: String,
+    val scheduleDays: Set<Int>,
+    val heartbeatSec: Int,
     val fullscreen: Boolean,
     val hideControls: Boolean,
     val orientation: String,
@@ -75,6 +84,29 @@ data class KioskConfig(
             val controlsRaw = strAny("", "controls").lowercase()
             val filesRaw = strAny("", "files", "playlist_files")
             val singleFileLegacy = strAny("", "single_file")
+            val scheduleDaysRaw = strAny("mon,tue,wed,thu,fri,sat,sun", "schedule_days")
+
+            fun parseScheduleDays(raw: String): Set<Int> {
+                if (raw.isBlank()) return setOf(1, 2, 3, 4, 5, 6, 7)
+                val map = mapOf(
+                    "mon" to 1,
+                    "tue" to 2,
+                    "wed" to 3,
+                    "thu" to 4,
+                    "fri" to 5,
+                    "sat" to 6,
+                    "sun" to 7,
+                )
+                val out = raw
+                    .split(',', ';', ' ')
+                    .map { it.trim().lowercase() }
+                    .filter { it.isNotBlank() }
+                    .mapNotNull { token ->
+                        token.toIntOrNull()?.takeIf { it in 1..7 } ?: map[token]
+                    }
+                    .toSet()
+                return if (out.isEmpty()) setOf(1, 2, 3, 4, 5, 6, 7) else out
+            }
 
             val normalizedLoop = when (loopRaw) {
                 "one", "loop_one" -> "loop_one"
@@ -111,6 +143,15 @@ data class KioskConfig(
                 singleFile = singleFile,
                 playlistFiles = playlist,
                 loopMode = normalizedLoop,
+                imageDurationSec = intAny(10, "image_duration_sec").coerceIn(1, 3600),
+                streamUrl = strAny("", "stream_url", "stream"),
+                sourcePreference = strAny("local_first", "source_preference").lowercase(),
+                fallbackOnStreamError = boolAny(true, "fallback_on_stream_error"),
+                scheduleEnabled = boolAny(false, "schedule_enabled"),
+                scheduleStart = strAny("00:00", "schedule_start"),
+                scheduleEnd = strAny("23:59", "schedule_end"),
+                scheduleDays = parseScheduleDays(scheduleDaysRaw),
+                heartbeatSec = intAny(60, "heartbeat_sec").coerceIn(15, 3600),
                 fullscreen = boolAny(true, "fullscreen"),
                 hideControls = hideControls,
                 orientation = strAny("landscape", "orientation").lowercase(),

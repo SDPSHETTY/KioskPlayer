@@ -22,12 +22,62 @@
         android:defaultValue="" />
 
     <restriction
+        android:key="stream_url"
+        android:title="Stream URL"
+        android:restrictionType="string"
+        android:defaultValue="" />
+
+    <restriction
+        android:key="source_preference"
+        android:title="Source Preference"
+        android:restrictionType="choice"
+        android:entries="@array/source_preference_entries"
+        android:entryValues="@array/source_preference_values"
+        android:defaultValue="local_first" />
+
+    <restriction
         android:key="loop"
         android:title="Loop"
         android:restrictionType="choice"
         android:entries="@array/loop_mode_entries"
         android:entryValues="@array/loop_mode_values"
         android:defaultValue="all" />
+
+    <restriction
+        android:key="image_duration_sec"
+        android:title="Image Duration Seconds"
+        android:restrictionType="integer"
+        android:defaultValue="10" />
+
+    <restriction
+        android:key="fallback_on_stream_error"
+        android:title="Fallback on Stream Error"
+        android:restrictionType="bool"
+        android:defaultValue="true" />
+
+    <restriction
+        android:key="schedule_enabled"
+        android:title="Schedule Enabled"
+        android:restrictionType="bool"
+        android:defaultValue="false" />
+
+    <restriction
+        android:key="schedule_start"
+        android:title="Schedule Start (HH:mm)"
+        android:restrictionType="string"
+        android:defaultValue="00:00" />
+
+    <restriction
+        android:key="schedule_end"
+        android:title="Schedule End (HH:mm)"
+        android:restrictionType="string"
+        android:defaultValue="23:59" />
+
+    <restriction
+        android:key="schedule_days"
+        android:title="Schedule Days"
+        android:restrictionType="string"
+        android:defaultValue="mon,tue,wed,thu,fri,sat,sun" />
 
     <restriction
         android:key="fullscreen"
@@ -80,5 +130,11 @@
         android:title="Show Debug Overlay"
         android:restrictionType="bool"
         android:defaultValue="false" />
+
+    <restriction
+        android:key="heartbeat_sec"
+        android:title="Heartbeat Seconds"
+        android:restrictionType="integer"
+        android:defaultValue="60" />
 
 </restrictions>

@@ -27,6 +27,18 @@
         <item>show</item>
         <item>hide</item>
     </string-array>
+    <string-array name="source_preference_entries">
+        <item>Local First</item>
+        <item>Stream First</item>
+        <item>Local Only</item>
+        <item>Stream Only</item>
+    </string-array>
+    <string-array name="source_preference_values">
+        <item>local_first</item>
+        <item>stream_first</item>
+        <item>local_only</item>
+        <item>stream_only</item>
+    </string-array>
     <string-array name="orientation_entries">
         <item>Landscape</item>
         <item>Portrait</item>

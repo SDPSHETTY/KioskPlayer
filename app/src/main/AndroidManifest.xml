@@ -6,6 +6,19 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
 
+    <!-- Custom permissions for secure broadcast receivers -->
+    <permission
+        android:name="com.esper.kioskplayer.permission.DEBUG_CONFIG"
+        android:label="KioskPlayer Debug Configuration"
+        android:description="@string/perm_debug_config_description"
+        android:protectionLevel="signature" />
+
+    <permission
+        android:name="com.esper.kioskplayer.permission.REMOTE_CONTROL"
+        android:label="KioskPlayer Remote Control"
+        android:description="@string/perm_remote_control_description"
+        android:protectionLevel="signature" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -46,7 +59,8 @@
         <receiver
             android:name=".DebugConfigReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="true"
+            android:permission="com.esper.kioskplayer.permission.DEBUG_CONFIG">
             <intent-filter>
                 <action android:name="com.esper.kioskplayer.DEBUG_APPLY_CONFIG" />
                 <action android:name="com.esper.kioskplayer.DEBUG_CLEAR_CONFIG" />
@@ -56,7 +70,8 @@
         <receiver
             android:name=".ControlReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="true"
+            android:permission="com.esper.kioskplayer.permission.REMOTE_CONTROL">
             <intent-filter>
                 <action android:name="com.esper.kioskplayer.REFRESH_NOW" />
                 <action android:name="com.esper.kioskplayer.HEALTH_DUMP" />

@@ -1,6 +1,10 @@
 <resources>
     <string name="app_name">KioskPlayer</string>
     <string name="overlay_no_media">No playable video found for current config.</string>
+
+    <!-- Permission descriptions -->
+    <string name="perm_debug_config_description">Allows access to debug configuration features</string>
+    <string name="perm_remote_control_description">Allows remote control of KioskPlayer operations</string>
     <string-array name="play_mode_entries">
         <item>Single</item>
         <item>Playlist</item>

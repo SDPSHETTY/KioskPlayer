@@ -12,8 +12,11 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
-import android.os.Handler
-import android.os.Looper
+import androidx.activity.viewModels
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.launch
 import android.util.Log
 import android.view.View
 import android.widget.ImageView
@@ -51,33 +54,27 @@ class MainActivity : AppCompatActivity() {
     private lateinit var imageView: ImageView
     private lateinit var statusText: TextView
 
-    private val mainHandler = Handler(Looper.getMainLooper())
+    private val viewModel: MainViewModel by viewModels()
+    private lateinit var imageTimer: ImageTimer
+
     private var player: ExoPlayer? = null
     private var currentConfig: KioskConfig? = null
     private var permissionRequestInFlight = false
 
     private var currentItems: List<PlayItem> = emptyList()
     private var currentIndex = 0
-    private var imageAdvanceRunnable: Runnable? = null
-
     private var lastPlayerError: String? = null
 
-    private val configPollRunnable = object : Runnable {
-        override fun run() {
-            applyConfigAndStartPlayback(force = false)
-            val next = currentConfig?.heartbeatSec ?: 60
-            mainHandler.postDelayed(this, next * 1000L)
-        }
-    }
 
     private val restrictionsChangedReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val action = intent?.action ?: return
             if (action == ManagedConfigReceiver.ACTION_CONFIG_CHANGED || action == ControlReceiver.ACTION_REFRESH_NOW) {
-                applyConfigAndStartPlayback(force = true)
+                // Force immediate configuration refresh via ViewModel
+                viewModel.forceConfigurationRefresh()
             }
             if (action == ControlReceiver.ACTION_HEALTH_DUMP_INTERNAL || action == ControlReceiver.ACTION_HEALTH_DUMP) {
-                dumpHealthToLog()
+                viewModel.dumpHealthToLog()
             }
         }
     }
@@ -97,6 +94,12 @@ class MainActivity : AppCompatActivity() {
         imageView = findViewById(R.id.imageView)
         statusText = findViewById(R.id.statusText)
 
+        // Initialize image timer with lifecycle scope
+        imageTimer = ImageTimer(lifecycleScope)
+
+        // Set up ViewModel observers
+        setupViewModelObservers()
+
         ensurePlayer()
         applyConfigAndStartPlayback(force = true)
     }
@@ -110,12 +113,18 @@ class MainActivity : AppCompatActivity() {
             addAction(ControlReceiver.ACTION_HEALTH_DUMP_INTERNAL)
         }
         ContextCompat.registerReceiver(this, restrictionsChangedReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
-        mainHandler.post(configPollRunnable)
+
+        // Start configuration polling via ViewModel
+        viewModel.startConfigurationPolling()
     }
 
     override fun onStop() {
-        mainHandler.removeCallbacks(configPollRunnable)
-        stopImageTimer()
+        // Stop configuration polling
+        viewModel.stopConfigurationPolling()
+
+        // Stop image timer
+        imageTimer.stopTimer()
+
         try {
             unregisterReceiver(restrictionsChangedReceiver)
         } catch (_: IllegalArgumentException) {
@@ -124,8 +133,34 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        // Cleanup image timer
+        imageTimer.cleanup()
         releasePlayer()
         super.onDestroy()
+    }
+
+    /**
+     * Sets up observers for ViewModel state changes
+     */
+    private fun setupViewModelObservers() {
+        // Observe configuration changes
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.configUpdateTrigger.collect { _ ->
+                    // Configuration has changed, apply it
+                    applyConfigAndStartPlayback(force = true)
+                }
+            }
+        }
+
+        // Observe current configuration
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.currentConfig.collect { config ->
+                    currentConfig = config
+                }
+            }
+        }
     }
 
     private fun ensurePlayer() {
@@ -133,11 +168,33 @@ class MainActivity : AppCompatActivity() {
         val exoPlayer = ExoPlayer.Builder(this).build().apply {
             addListener(object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) {
-                    lastPlayerError = "${error.errorCodeName} ${error.message ?: ""}".trim()
-                    Log.e(TAG, "Playback error: $lastPlayerError")
+                    // Use enhanced error handling
+                    val errorInfo = ErrorHandler.handleMediaError(error)
+                    lastPlayerError = errorInfo.code
+
+                    ErrorHandler.logError(errorInfo)
+
+                    // Create user-friendly error message
+                    val userMessage = ErrorHandler.createUserMessage(errorInfo)
+
                     val cfg = currentConfig
-                    if (cfg?.fallbackOnStreamError == true) {
-                        playNextFromSequence(allowWrap = false)
+                    if (cfg != null) {
+                        // Record health with structured error
+                        recordHealth(cfg, "ERROR", errorInfo.code, currentItems.size)
+
+                        // Show user-friendly error message
+                        showStatus(true, userMessage)
+
+                        // Attempt recovery based on configuration
+                        if (cfg.fallbackOnStreamError) {
+                            ErrorHandler.logInfo(
+                                ErrorHandler.ErrorCategory.MEDIA_PLAYBACK,
+                                "FALLBACK_ATTEMPT",
+                                "Attempting fallback to next media item",
+                                mapOf("currentIndex" to currentIndex, "totalItems" to currentItems.size)
+                            )
+                            playNextFromSequence(allowWrap = false)
+                        }
                     }
                 }
 
@@ -169,17 +226,59 @@ class MainActivity : AppCompatActivity() {
     private fun applyConfigAndStartPlayback(force: Boolean) {
         ensurePlayer()
         if (!requestMediaReadPermissionIfNeeded()) {
-            showStatus(true, "Storage permission required to read media files.")
+            val errorInfo = ErrorHandler.ErrorInfo(
+                ErrorHandler.ErrorCategory.PERMISSION,
+                "STORAGE_PERMISSION",
+                "Storage permission required to read media files"
+            )
+            ErrorHandler.logWarning(
+                errorInfo.category,
+                errorInfo.code,
+                errorInfo.message
+            )
+            showStatus(true, ErrorHandler.createUserMessage(errorInfo))
             return
         }
 
-        val config = KioskConfig.fromRestrictions(this)
+        val config = try {
+            KioskConfig.fromRestrictions(this)
+        } catch (e: Exception) {
+            val errorInfo = ErrorHandler.ErrorInfo(
+                ErrorHandler.ErrorCategory.CONFIGURATION,
+                "CONFIG_LOAD_FAILED",
+                "Failed to load configuration from managed restrictions",
+                mapOf("force" to force),
+                e
+            )
+            ErrorHandler.logError(errorInfo)
+            showStatus(true, ErrorHandler.createUserMessage(errorInfo))
+            return
+        }
+
+        // Validate configuration
+        val configError = ErrorHandler.validateConfiguration(config)
+        if (configError != null) {
+            ErrorHandler.logError(configError)
+            showStatus(true, ErrorHandler.createUserMessage(configError))
+            recordHealth(config, "CONFIG_ERROR", configError.code, 0)
+            return
+        }
+
         val previous = currentConfig
         currentConfig = config
 
-        Log.i(
-            TAG,
-            "Applying config mode=${config.playMode} loop=${config.loopMode} path=${config.videoDir} source_pref=${config.sourcePreference}"
+        // Log successful configuration load
+        ErrorHandler.logInfo(
+            ErrorHandler.ErrorCategory.CONFIGURATION,
+            "CONFIG_APPLIED",
+            "Configuration successfully applied",
+            mapOf(
+                "mode" to config.playMode,
+                "loop" to config.loopMode,
+                "path" to config.videoDir,
+                "source_pref" to config.sourcePreference,
+                "force" to force
+            )
         )
 
         applyWindowMode(config)
@@ -196,10 +295,25 @@ class MainActivity : AppCompatActivity() {
         val items = buildPlayItems(config)
         if (items.isEmpty()) {
             stopPlayback()
+
+            val errorInfo = ErrorHandler.ErrorInfo(
+                ErrorHandler.ErrorCategory.FILE_SYSTEM,
+                "NO_MEDIA",
+                "No playable media files found",
+                mapOf(
+                    "videoDir" to config.videoDir,
+                    "streamUrl" to config.streamUrl,
+                    "playMode" to config.playMode,
+                    "sourcePreference" to config.sourcePreference
+                )
+            )
+
+            ErrorHandler.logError(errorInfo)
+
             val message = if (config.showDebugOverlay) {
                 buildOverlay(config, "No playable files found.", emptyList())
             } else {
-                "No media found. Check path, stream URL, and file names in managed config."
+                ErrorHandler.createUserMessage(errorInfo)
             }
             showStatus(true, message)
             recordHealth(config, "NO_MEDIA", "no_media", 0)
@@ -208,7 +322,21 @@ class MainActivity : AppCompatActivity() {
 
         if (!config.skipMissingFiles && hasMissingFiles(config)) {
             stopPlayback()
-            showStatus(true, "Some media files are missing. Upload files or update config.")
+
+            val missingFiles = getMissingFiles(config)
+            val errorInfo = ErrorHandler.ErrorInfo(
+                ErrorHandler.ErrorCategory.FILE_SYSTEM,
+                "MISSING_FILES",
+                "Required media files are missing",
+                mapOf(
+                    "missingCount" to missingFiles.size,
+                    "missingFiles" to missingFiles.take(5), // Log first 5 missing files
+                    "skipMissingFiles" to config.skipMissingFiles
+                )
+            )
+
+            ErrorHandler.logError(errorInfo)
+            showStatus(true, ErrorHandler.createUserMessage(errorInfo))
             recordHealth(config, "MISSING_MEDIA", "missing_files", 0)
             return
         }
@@ -254,14 +382,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun hasMissingFiles(config: KioskConfig): Boolean {
+        return getMissingFiles(config).isNotEmpty()
+    }
+
+    private fun getMissingFiles(config: KioskConfig): List<String> {
         val baseDir = resolveBaseDirectory(config.videoDir)
         val requested = when {
             config.playMode == "single" && config.singleFile.isNotBlank() -> listOf(config.singleFile)
             config.playlistFiles.isNotEmpty() -> config.playlistFiles
             else -> emptyList()
         }
-        if (requested.isEmpty()) return false
-        return requested.any { entry ->
+        if (requested.isEmpty()) return emptyList()
+
+        return requested.filter { entry ->
             val f = resolveFile(baseDir, entry)
             !f.exists() || !f.isFile || !isSupportedMediaFile(f)
         }
@@ -279,14 +412,29 @@ class MainActivity : AppCompatActivity() {
 
             val bitmap = BitmapFactory.decodeFile(item.path)
             if (bitmap == null) {
+                val errorInfo = ErrorHandler.ErrorInfo(
+                    ErrorHandler.ErrorCategory.MEDIA_PLAYBACK,
+                    "IMAGE_DECODE_FAILED",
+                    "Failed to decode image file",
+                    mapOf(
+                        "path" to item.path,
+                        "index" to currentIndex,
+                        "totalItems" to currentItems.size
+                    )
+                )
+                ErrorHandler.logError(errorInfo)
+
+                // Skip to next item
                 playNextFromSequence(allowWrap = true)
                 return
             }
 
             imageView.setImageBitmap(bitmap)
-            val delayMs = (config.imageDurationSec.coerceAtLeast(1) * 1000L)
-            imageAdvanceRunnable = Runnable { playNextFromSequence(allowWrap = true) }
-            mainHandler.postDelayed(imageAdvanceRunnable!!, delayMs)
+
+            // Start image timer using coroutines
+            imageTimer.startTimer(config.imageDurationSec) {
+                playNextFromSequence(allowWrap = true)
+            }
             return
         }
 
@@ -341,8 +489,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopImageTimer() {
-        imageAdvanceRunnable?.let { mainHandler.removeCallbacks(it) }
-        imageAdvanceRunnable = null
+        imageTimer.stopTimer()
     }
 
     private fun isWithinSchedule(config: KioskConfig): Boolean {
@@ -478,29 +625,11 @@ class MainActivity : AppCompatActivity() {
         ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
 
     private fun recordHealth(config: KioskConfig, state: String, error: String?, mediaCount: Int) {
-        val prefs = getSharedPreferences(HEALTH_PREFS, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putLong("last_update_ms", System.currentTimeMillis())
-            .putString("state", state)
-            .putString("error", error)
-            .putInt("media_count", mediaCount)
-            .putString("path", config.videoDir)
-            .putString("mode", config.playMode)
-            .putString("loop", config.loopMode)
-            .apply()
-    }
-
-    private fun dumpHealthToLog() {
-        val prefs = getSharedPreferences(HEALTH_PREFS, Context.MODE_PRIVATE)
-        Log.i(
-            TAG,
-            "health state=${prefs.getString("state", "unknown")} error=${prefs.getString("error", null)} media_count=${prefs.getInt("media_count", 0)} updated=${prefs.getLong("last_update_ms", 0)}"
-        )
+        viewModel.recordHealth(state, error, mediaCount)
     }
 
     companion object {
         private const val TAG = "KioskPlayer"
-        private const val HEALTH_PREFS = "kioskplayer_health"
 
         fun start(context: Context) {
             val intent = Intent(context, MainActivity::class.java).apply {
